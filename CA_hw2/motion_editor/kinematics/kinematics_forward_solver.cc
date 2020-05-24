@@ -66,12 +66,8 @@ PoseColl_t ForwardSolver::ComputeSkeletonPose(const math::Vector6dColl_t &joint_
 	
 	std::shared_ptr<acclaim::Skeleton> skeleton = this->skeleton();
 	
-	const int rootIdx = skeleton->root_idx();
-	const acclaim::Bone* root = skeleton->bone_ptr(rootIdx);
-	
-	std::function<void(const acclaim::Bone*, math::Vector3d_t, math::Vector3d_t, math::Quaternion_t)> Traversal =
-		// [&Traversal, &results, &skeleton, &joint_spatial_pos, &ComputeQuaternionXyz]
-		[&](const acclaim::Bone* parentBone, math::Vector3d_t parentWorldBonePosition, math::Vector3d_t parentWorldPosition, math::Quaternion_t parentWorldRotation) -> void {
+	std::function<void(const acclaim::Bone*, math::Vector3d_t, math::Quaternion_t)> Traversal = [&Traversal, &results, &skeleton, &joint_spatial_pos, &ComputeQuaternionXyz]
+		(const acclaim::Bone* parentBone, math::Vector3d_t parentEndEffectorWorldPosition, math::Quaternion_t accumulated_R) -> void {
 		
 		for (int i = 0; i < skeleton->bone_num(); ++i) {
 			
@@ -80,75 +76,49 @@ PoseColl_t ForwardSolver::ComputeSkeletonPose(const math::Vector6dColl_t &joint_
 			const math::Vector6d_t joint_local_pos_rot = joint_spatial_pos[boneIdx];
 			
 			const math::Vector3d_t jointPosition = joint_local_pos_rot.linear_vector();
-			const math::Quaternion_t jointRotation = ComputeQuaternionXyz(math::ToRadian(joint_local_pos_rot.angular_vector()));
+			const math::Quaternion_t jointRotation = ComputeQuaternionXyz(math::ToRadian(joint_local_pos_rot.angular_vector())); // Note it is DEGREE
 
 			if (bone->parent == parentBone) {
 
-				const math::Vector3d_t   parentBoneAxis = bone->parent->axis; // Note it is DEGREE !!!!!!!!!!!!!!!!!!!!!
-				const math::Quaternion_t parentBoneWorldBoneRotation = ComputeQuaternionXyz(math::ToRadian(parentBoneAxis));
+				math::Quaternion_t R_asf, R_amc;
 
-				const math::Vector3d_t   boneAxis = bone->axis; // Note it is DEGREE !!!!!!!!!!!!!!!!!!!!!
+				const math::Vector3d_t   boneAxis = bone->axis; // Note it is DEGREE
 				const math::Quaternion_t worldBoneRotation = ComputeQuaternionXyz(math::ToRadian(boneAxis));
-				const math::Vector3d_t   worldBonePosition = (worldBoneRotation * bone->dir) * bone->length + parentWorldBonePosition; // v_i-1 = R_amc * V0_hat * L
 
-				const math::Quaternion_t R_asf = parentBoneWorldBoneRotation.inverse() * worldBoneRotation;
-				const math::Quaternion_t R_amc = jointRotation;
+				// Compute R_asf
+				if (bone->parent == nullptr) { // root
+					R_asf = worldBoneRotation;
+				}
+				else {
+					const math::Vector3d_t   parentBoneAxis = bone->parent->axis;
+					const math::Quaternion_t parentBoneWorldBoneRotation = ComputeQuaternionXyz(math::ToRadian(parentBoneAxis));
+					R_asf = parentBoneWorldBoneRotation.inverse() * worldBoneRotation;
+				}
+				
+				// Compute R_amc
+				R_amc = jointRotation;
 
-				// Calculate current Position & Rotation in worldSpace
-				const math::Quaternion_t worldRotation = parentWorldRotation * R_asf * R_amc;				
-				// const math::Vector3d_t   worldPosition = worldRotation * (bone->dir * bone->length + jointPosition) + parentWorldPosition;
-				const math::Vector3d_t   worldPosition = parentWorldRotation * R_asf * (R_amc * bone->dir * bone->length + jointPosition) + parentWorldPosition;
+				// R accumlates (R_asf * R_amc), note the order of multiplication differs when calculating endPosition
+				const math::Quaternion_t R = accumulated_R * R_asf * R_amc;
+				const math::Vector3d_t   endPosition = accumulated_R * R_asf * (R_amc * bone->dir * bone->length + jointPosition) + parentEndEffectorWorldPosition;
 
-				// bind pose only
-				/*results[boneIdx] = Pose(
-					parentWorldBonePosition,
-					worldBonePosition,
-					worldBoneRotation.toRotationMatrix()
-				);
-				Traversal(bone, worldBonePosition, worldPosition, worldBoneRotation);
-				continue;*/
+				// deal special cases if dealing root bone (in this case parentEndEffectorWorldPosition equals skeleton->root_pos())
+				const math::Vector3d_t startPosition = (bone->parent == nullptr) ? (R_asf * jointPosition + parentEndEffectorWorldPosition) : parentEndEffectorWorldPosition;
 
-				// store the result into "results"
+				// Store results
 				results[boneIdx] = Pose(
-					parentWorldPosition,
-					worldPosition,
-					worldRotation.toRotationMatrix()
+					startPosition,
+					endPosition,
+					R.toRotationMatrix()
 				);
 
-				// std::cout << bone->name << " -> " << parentBone->name << std::endl;
-				Traversal(bone, worldBonePosition, worldPosition, worldRotation);
+				Traversal(bone, endPosition, R);
 			}
 		}
 	};
 
-	const math::Vector3d_t   rootBoneAxis = root->axis;
-	const math::Quaternion_t rootLocalBoneRotation = ComputeQuaternionXyz(math::ToRadian(rootBoneAxis));
-	
-	const math::Vector3d_t   rootJointPosition = joint_spatial_pos[rootIdx].linear_vector();
-	const math::Quaternion_t rootJointRotation = ComputeQuaternionXyz(math::ToRadian(joint_spatial_pos[rootIdx].angular_vector()));
+	Traversal(nullptr, skeleton->root_pos(), math::Quaternion_t::Identity()); // DFS Traversal on the bone trees
 
-	const math::Quaternion_t rootWorldBoneRotation = rootLocalBoneRotation;
-	const math::Vector3d_t   rootWorldBonePosition = rootLocalBoneRotation * root->dir * root->length + skeleton->root_pos();
-
-	const math::Quaternion_t R_asf = rootWorldBoneRotation;
-	const math::Quaternion_t R_amc = rootJointRotation;
-	
-	const math::Quaternion_t rootWorldRotation = R_asf * R_amc;
-	const math::Vector3d_t   rootWorldPosition = R_asf * (R_amc * root->dir * root->length + rootJointPosition) + skeleton->root_pos();
-
-	// const math::Vector3d_t   rootWorldPosition = ;
-	
-	results[rootIdx] = Pose(
-		R_asf * rootJointPosition + skeleton->root_pos(),
-		rootWorldPosition,
-		rootWorldRotation.toRotationMatrix()
-	);
-
-	Traversal(root, rootWorldBonePosition, rootWorldPosition, rootWorldRotation); // DFS Traversal on the bone trees
-
-	// results = helper_fk_->ComputeSkeletonPose(joint_spatial_pos);
-
-    // TO DO
 	return results;
 }
 

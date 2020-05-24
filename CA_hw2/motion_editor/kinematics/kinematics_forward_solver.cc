@@ -57,8 +57,27 @@ PoseColl_t ForwardSolver::ComputeSkeletonPose(const int32_t frame_idx)
 
 PoseColl_t ForwardSolver::ComputeSkeletonPose(const math::Vector6dColl_t &joint_spatial_pos)
 {
+	PoseColl_t results;	// return instance
+	
+	std::shared_ptr<acclaim::Skeleton> skeleton = this->skeleton();
+	const acclaim::Bone* root = skeleton->bone_ptr(skeleton->root_idx());
+
+	std::function<void(const acclaim::Bone*)> Traversal = [&](const acclaim::Bone* parentBone) {
+		for (int i = 0; i < skeleton->bone_num(); ++i) {
+			auto bone = skeleton->bone_ptr(i);
+			if (bone->parent == parentBone) {
+				std::cout << bone->name << " -> " << parentBone->name << std::endl;
+				Traversal(bone);
+			}
+		}
+	};
+	
+	Traversal(root); // DFS Traversal on the bone trees
+	
+	results = helper_fk_->ComputeSkeletonPose(joint_spatial_pos);
+
     // TO DO
-    return helper_fk_->ComputeSkeletonPose(joint_spatial_pos);
+	return results;
 }
 
 // protected func.

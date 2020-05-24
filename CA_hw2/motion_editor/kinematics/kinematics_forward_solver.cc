@@ -57,6 +57,10 @@ PoseColl_t ForwardSolver::ComputeSkeletonPose(const int32_t frame_idx)
 
 PoseColl_t ForwardSolver::ComputeSkeletonPose(const math::Vector6dColl_t &joint_spatial_pos)
 {
+	std::function<math::Quaternion_t(math::Vector3d_t)> ComputeQuaternionXyz = [](math::Vector3d_t v) ->math::Quaternion_t {
+		return math::ComputeQuaternionXyz(v.x(), v.y(), v.z());
+	};
+
 	PoseColl_t results;
 	results.resize(joint_spatial_pos.size());
 	
@@ -67,18 +71,9 @@ PoseColl_t ForwardSolver::ComputeSkeletonPose(const math::Vector6dColl_t &joint_
 
 	const math::Vector3d_t root_joint_pos = joint_spatial_pos[rootIdx].linear_vector();
 	const math::Vector3d_t root_joint_rot = joint_spatial_pos[rootIdx].angular_vector();
-	
-	// const math::Vector3d_t rootLocalPosition = root_joint_pos; // simple rename to make varialble naming consistent
-	// const math::Quaternion_t rootRotation = math::ComputeQuaternionXyz(root_joint_rot.x(), root_joint_rot.y(), root_joint_rot.z());
-
-	// const math::Vector3d_t rootLocalPosition = skeleton->root_pos();
-
-	auto ComputeQuaternionXyz = [](math::Vector3d_t v) ->math::Quaternion_t {
-		return math::ComputeQuaternionXyz(v.x(), v.y(), v.z());
-	};
-
+		
 	std::function<void(const acclaim::Bone*, math::Vector3d_t, math::Quaternion_t)> Traversal = 
-		[&](const acclaim::Bone* parentBone, math::Vector3d_t parentWorldPosition, math::Quaternion_t parentWorldRotation) {
+		[&Traversal, &results, &skeleton, &joint_spatial_pos, &ComputeQuaternionXyz](const acclaim::Bone* parentBone, math::Vector3d_t parentWorldPosition, math::Quaternion_t parentWorldRotation) {
 		
 		for (int i = 0; i < skeleton->bone_num(); ++i) {
 			

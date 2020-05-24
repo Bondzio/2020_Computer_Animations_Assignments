@@ -57,7 +57,7 @@ PoseColl_t ForwardSolver::ComputeSkeletonPose(const int32_t frame_idx)
 
 PoseColl_t ForwardSolver::ComputeSkeletonPose(const math::Vector6dColl_t &joint_spatial_pos)
 {
-	std::function<math::Quaternion_t(math::Vector3d_t)> ComputeQuaternionXyz = [](math::Vector3d_t v) ->math::Quaternion_t {
+	std::function<math::Quaternion_t(math::Vector3d_t)> ComputeQuaternionXyz = [](math::Vector3d_t v) -> math::Quaternion_t {
 		return math::ComputeQuaternionXyz(v.x(), v.y(), v.z());
 	};
 

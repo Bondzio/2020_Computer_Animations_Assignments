@@ -57,24 +57,45 @@ PoseColl_t ForwardSolver::ComputeSkeletonPose(const int32_t frame_idx)
 
 PoseColl_t ForwardSolver::ComputeSkeletonPose(const math::Vector6dColl_t &joint_spatial_pos)
 {
-	PoseColl_t results;	// return instance
+	PoseColl_t results;
+	results.resize(joint_spatial_pos.size());
 	
 	std::shared_ptr<acclaim::Skeleton> skeleton = this->skeleton();
-	const acclaim::Bone* root = skeleton->bone_ptr(skeleton->root_idx());
+	const int rootIdx = skeleton->root_idx();
+	const acclaim::Bone* root = skeleton->bone_ptr(rootIdx);
+	const math::Vector3d_t rootPosition = joint_spatial_pos[rootIdx].linear_vector();
 
-	std::function<void(const acclaim::Bone*)> Traversal = [&](const acclaim::Bone* parentBone) {
+	std::function<void(const acclaim::Bone*, math::Vector3d_t, math::Quaternion_t)> Traversal = [&](const acclaim::Bone* parentBone, math::Vector3d_t parentPosition, math::Quaternion_t parentRotation) {
 		for (int i = 0; i < skeleton->bone_num(); ++i) {
-			auto bone = skeleton->bone_ptr(i);
+			auto boneIdx = i;
+			auto bone = skeleton->bone_ptr(boneIdx);
+			auto joint_local_pos_rot = joint_spatial_pos[bone->idx];
+			auto joint_local_rot = joint_local_pos_rot.angular_vector();
+			auto joint_local_pos = joint_local_pos_rot.linear_vector();
+			auto localPosition = joint_local_pos;
+			auto localRotation = math::ComputeQuaternionXyz(joint_local_rot.x(), joint_local_rot.y(), joint_local_rot.z());
+
 			if (bone->parent == parentBone) {
+
+				auto currentRotation = parentRotation * localRotation; // Calculate current Rotation
+				auto currentPosition = parentPosition + currentRotation * localPosition; // Calculate current Position
+
+				// store the result into "results"
+				results[boneIdx] = Pose(
+					currentPosition, 
+					currentPosition + bone->dir * bone->length, 
+					currentRotation.toRotationMatrix()
+				);
+
 				std::cout << bone->name << " -> " << parentBone->name << std::endl;
-				Traversal(bone);
+				Traversal(bone, currentPosition, currentRotation);
 			}
 		}
 	};
 	
-	Traversal(root); // DFS Traversal on the bone trees
+	Traversal(root, rootPosition, math::Quaternion_t()); // DFS Traversal on the bone trees
 	
-	results = helper_fk_->ComputeSkeletonPose(joint_spatial_pos);
+	// results = helper_fk_->ComputeSkeletonPose(joint_spatial_pos);
 
     // TO DO
 	return results;
